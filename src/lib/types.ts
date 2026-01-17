@@ -25,6 +25,15 @@ export type Room = {
     answersOpen: boolean;
     revealedAnswer: boolean;
   };
+
+  // Sudden Death
+  suddenDeath?: {
+    active: boolean;
+    question: TriviaQuestion;
+    eligiblePlayerIds: string[]; // Players tied for first
+    revealed: boolean;
+    acceptingAnswers: boolean;
+  };
 };
 
 export type Player = {

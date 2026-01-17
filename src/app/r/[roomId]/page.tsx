@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import { deleteField } from "firebase/firestore";
 import { CopyBox } from "@/components/CopyBox";
 import {
   joinAsPlayer,
@@ -46,12 +47,15 @@ export default function RoomPage({ params }: { params: { roomId: string } }) {
   const [subs, setSubs] = useState<Submission[]>([]);
   const [wagers, setWagers] = useState<Wager[]>([]);
   const [finalAnswers, setFinalAnswers] = useState<FinalAnswer[]>([]);
+  const [suddenDeathSubs, setSuddenDeathSubs] = useState<Submission[]>([]);
 
   const playerId = useLocalId(`trivia_player_${roomId}`);
   const [playerName, setPlayerName] = useState<string>("");
   const [joined, setJoined] = useState(false);
   const [timeRemaining, setTimeRemaining] = useState<number | null>(null);
   const [expandedField, setExpandedField] = useState<{ type: "question" | "answer" | "category"; text: string; questionIndex: number } | null>(null);
+  const [showSuddenDeathResults, setShowSuddenDeathResults] = useState(false);
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => subscribeRoom(roomId, setRoom), [roomId]);
   useEffect(() => subscribePlayers(roomId, setPlayers), [roomId]);
@@ -61,8 +65,41 @@ export default function RoomPage({ params }: { params: { roomId: string } }) {
   }, [roomId, room]);
   useEffect(() => subscribeWagers(roomId, setWagers), [roomId]);
   useEffect(() => subscribeFinalAnswers(roomId, setFinalAnswers), [roomId]);
+  useEffect(() => {
+    if (!room || !room.suddenDeath?.active) return;
+    return subscribeSubmissions(roomId, 999, setSuddenDeathSubs); // Use index 999 for sudden death
+  }, [roomId, room]);
 
   const isHost = useMemo(() => !!room && hostSecret && room.hostSecret === hostSecret, [room, hostSecret]);
+
+  // Helper to determine if all final answers are judged
+  const allFinalAnswersJudged = useMemo(() => {
+    if (!finalAnswers.length || !players.length) return false;
+    const playersWithAnswers = finalAnswers.filter(a => a.judged !== null);
+    return playersWithAnswers.length === players.length || (finalAnswers.length > 0 && finalAnswers.every(a => a.judged !== null));
+  }, [finalAnswers, players]);
+
+  // Get leaders (players tied for first)
+  const leaders = useMemo(() => {
+    if (!players.length) return [];
+    const maxScore = Math.max(...players.map(p => p.score));
+    return players.filter(p => p.score === maxScore);
+  }, [players]);
+
+  // Detect sudden death winner
+  const suddenDeathWinner = useMemo(() => {
+    if (!room?.suddenDeath?.active || !suddenDeathSubs.length) return null;
+    const winningSubmission = suddenDeathSubs.find(s => s.judged === true);
+    if (!winningSubmission) return null;
+    return players.find(p => p.id === winningSubmission.playerId) || null;
+  }, [room, suddenDeathSubs, players]);
+
+  // Show modal when sudden death winner is determined
+  useEffect(() => {
+    if (suddenDeathWinner && !showSuddenDeathResults) {
+      setShowSuddenDeathResults(true);
+    }
+  }, [suddenDeathWinner, showSuddenDeathResults]);
 
   // Timer effect: auto-close answers after 30 seconds
   useEffect(() => {
@@ -140,7 +177,12 @@ export default function RoomPage({ params }: { params: { roomId: string } }) {
         {isHost && hostLink ? <CopyBox label="Host link (keep private)" value={hostLink} /> : null}
       </div>
 
-      {isHost ? (
+      {room.status === "ended" && !isHost ? (
+        <ResultsView
+          players={players}
+          me={me}
+        />
+      ) : isHost ? (
         <HostView
           roomId={roomId}
           room={room}
@@ -149,6 +191,9 @@ export default function RoomPage({ params }: { params: { roomId: string } }) {
           subs={subs}
           wagers={wagers}
           finalAnswers={finalAnswers}
+          suddenDeathSubs={suddenDeathSubs}
+          allFinalAnswersJudged={allFinalAnswersJudged}
+          leaders={leaders}
           expandedField={expandedField}
           setExpandedField={setExpandedField}
         />
@@ -250,6 +295,203 @@ export default function RoomPage({ params }: { params: { roomId: string } }) {
           `}</style>
         </div>
       )}
+
+      {showSuddenDeathResults && suddenDeathWinner && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: "rgba(0, 0, 0, 0.9)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 2000,
+            padding: 20,
+            animation: "fadeIn 0.3s ease-in"
+          }}
+        >
+          <div
+            className="card"
+            style={{
+              maxWidth: 600,
+              maxHeight: "85vh",
+              overflow: "auto",
+              animation: "slideIn 0.4s ease-out"
+            }}
+          >
+            <div style={{ textAlign: "center", marginBottom: 20 }}>
+              <div style={{ fontSize: 40, marginBottom: 10 }}>🎉</div>
+              <div className="h1" style={{ color: "#4ecdc4", marginBottom: 10 }}>
+                {suddenDeathWinner.name} Wins!
+              </div>
+              <div className="small">Sudden death tiebreaker complete</div>
+            </div>
+
+            <div className="hr" />
+
+            <div className="h2">Final Leaderboard</div>
+            <div className="grid" style={{ gap: 12, marginTop: 16 }}>
+              {[...players].sort((a, b) => b.score - a.score).map((p, idx) => (
+                <div
+                  key={p.id}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    padding: "12px 16px",
+                    background: p.id === suddenDeathWinner.id ? "#1e4d3b" : "#0c1323",
+                    borderRadius: 8,
+                    border: p.id === suddenDeathWinner.id ? "2px solid #4ecdc4" : "1px solid #1e2a44"
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                    <div style={{
+                      fontSize: 18,
+                      fontWeight: 700,
+                      minWidth: 30,
+                      color: idx === 0 ? "#4ecdc4" : "#8ab4ff"
+                    }}>
+                      #{idx + 1}
+                    </div>
+                    <div style={{ fontWeight: 600 }}>{p.name}</div>
+                    {p.id === suddenDeathWinner.id && <span style={{ fontSize: 20 }}>👑</span>}
+                  </div>
+                  <div className="mono" style={{ fontSize: 18, fontWeight: 700 }}>{p.score}</div>
+                </div>
+              ))}
+            </div>
+
+            <div className="hr" />
+            {isHost && (
+              <button
+                className="btn"
+                onClick={async () => {
+                  setBusy(true);
+                  try {
+                    // Reset all scores
+                    await resetAllScores(roomId, hostSecret);
+                    // Generate new questions
+                    const res = await fetch("/api/generate", { method: "POST" });
+                    const data = await res.json();
+                    // Reset game state
+                    await patchRoomIfHost(roomId, hostSecret, {
+                      questions: data.questions,
+                      currentIndex: 0,
+                      status: "lobby",
+                      revealed: false,
+                      acceptingAnswers: false,
+                      final: { wagersOpen: false, answersOpen: false, revealedAnswer: false },
+                      suddenDeath: deleteField() as any
+                    });
+                    setShowSuddenDeathResults(false);
+                  } catch (err) {
+                    alert(`Error starting new game: ${err}`);
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
+                style={{ width: "100%" }}
+                disabled={busy}
+              >
+                Start New Game
+              </button>
+            )}
+            {!isHost && (
+              <div className="small" style={{ textAlign: "center", opacity: 0.7 }}>
+                Waiting for host to start a new game...
+              </div>
+            )}
+          </div>
+          <style jsx>{`
+            @keyframes slideIn {
+              from {
+                opacity: 0;
+                transform: translateY(-30px);
+              }
+              to {
+                opacity: 1;
+                transform: translateY(0);
+              }
+            }
+          `}</style>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ResultsView({ players, me }: { players: Player[]; me: Player | null }) {
+  const sortedPlayers = useMemo(() => [...players].sort((a, b) => b.score - a.score), [players]);
+  const winner = sortedPlayers[0];
+  const myRank = me ? sortedPlayers.findIndex(p => p.id === me.id) + 1 : 0;
+
+  let message = "Better luck next time!";
+  let messageColor = "#8ab4ff";
+
+  if (me) {
+    if (myRank === 1 && sortedPlayers.filter(p => p.score === winner?.score).length === 1) {
+      message = "🎉 Congratulations! You won! 🎉";
+      messageColor = "#4ecdc4";
+    } else if (me.score === 0) {
+      message = "You lost - better luck next time!";
+      messageColor = "#ff6b6b";
+    }
+  }
+
+  return (
+    <div className="card">
+      <div className="h1" style={{ textAlign: "center", marginBottom: 20 }}>Game Over!</div>
+
+      {me && (
+        <div style={{
+          padding: 20,
+          background: "#0c1323",
+          borderRadius: 10,
+          marginBottom: 20,
+          textAlign: "center",
+          fontSize: 20,
+          color: messageColor,
+          fontWeight: 600
+        }}>
+          {message}
+        </div>
+      )}
+
+      <div className="h2">Final Leaderboard</div>
+      <div className="hr" />
+      <div className="grid" style={{ gap: 12 }}>
+        {sortedPlayers.map((p, idx) => (
+          <div
+            key={p.id}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              padding: "12px 16px",
+              background: p.id === me?.id ? "#1e2749" : "#0c1323",
+              borderRadius: 8,
+              border: idx === 0 ? "2px solid #4ecdc4" : "1px solid #1e2a44"
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <div style={{
+                fontSize: 18,
+                fontWeight: 700,
+                minWidth: 30,
+                color: idx === 0 ? "#4ecdc4" : "#8ab4ff"
+              }}>
+                #{idx + 1}
+              </div>
+              <div style={{ fontWeight: 600 }}>{p.name}</div>
+              {idx === 0 && <span style={{ fontSize: 20 }}>👑</span>}
+            </div>
+            <div className="mono" style={{ fontSize: 18, fontWeight: 700 }}>{p.score}</div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -262,6 +504,9 @@ function HostView({
   subs,
   wagers,
   finalAnswers,
+  suddenDeathSubs,
+  allFinalAnswersJudged,
+  leaders,
   expandedField,
   setExpandedField
 }: {
@@ -272,6 +517,9 @@ function HostView({
   subs: Submission[];
   wagers: Wager[];
   finalAnswers: FinalAnswer[];
+  suddenDeathSubs: Submission[];
+  allFinalAnswersJudged: boolean;
+  leaders: Player[];
   expandedField: { type: "question" | "answer" | "category"; text: string; questionIndex: number } | null;
   setExpandedField: (field: { type: "question" | "answer" | "category"; text: string; questionIndex: number } | null) => void;
 }) {
@@ -330,6 +578,55 @@ function HostView({
     }
   }
 
+  async function endGame() {
+    await patchRoomIfHost(roomId, hostSecret, { status: "ended" });
+  }
+
+  async function startSuddenDeath() {
+    setBusy(true);
+    try {
+      const res = await fetch("/api/replace", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ index: 10 }) });
+      const data = await res.json();
+      if (data.question) {
+        await patchRoomIfHost(roomId, hostSecret, {
+          suddenDeath: {
+            active: true,
+            question: { ...data.question, id: "sudden_death" },
+            eligiblePlayerIds: leaders.map(p => p.id),
+            revealed: false,
+            acceptingAnswers: false
+          }
+        });
+      }
+    } catch (err) {
+      alert(`Error starting sudden death: ${err}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function replaceSuddenDeathQuestion() {
+    setBusy(true);
+    try {
+      const res = await fetch("/api/replace", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ index: 10 }) });
+      const data = await res.json();
+      if (data.question) {
+        await patchRoomIfHost(roomId, hostSecret, {
+          suddenDeath: {
+            ...room.suddenDeath!,
+            question: { ...data.question, id: "sudden_death" }
+          }
+        });
+      }
+    } catch (err) {
+      alert(`Error replacing sudden death question: ${err}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const isSuddenDeath = room.suddenDeath?.active;
+  const suddenDeathQ = room.suddenDeath?.question;
   const nonFinal = room.currentIndex < 9;
 
   return (
@@ -635,6 +932,105 @@ function HostView({
               Final answer key (host): <span className="mono">{q.answer || "(not set)"}</span>
               {q.answer && q.answer.length > 60 && <span style={{ marginLeft: 8, opacity: 0.6, fontSize: 12 }}>🔍</span>}
             </div>
+
+            {allFinalAnswersJudged && (
+              <>
+                <div className="hr" />
+                <div className="row" style={{ gap: 12 }}>
+                  {leaders.length > 1 ? (
+                    <button className="btn" disabled={busy || isSuddenDeath} onClick={startSuddenDeath}>
+                      ⚡ Start Sudden Death ({leaders.length} tied)
+                    </button>
+                  ) : null}
+                  <button className="btn btnSecondary" onClick={endGame}>
+                    {leaders.length === 1 ? "End Game - Show Results" : "End Game (Tie)"}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {isSuddenDeath && suddenDeathQ && (
+        <div className="card">
+          <div className="h2">⚡ Sudden Death Tiebreaker</div>
+          <div className="small">Only players tied for first can answer. First correct answer wins!</div>
+          <div className="hr" />
+
+          <div className="grid" style={{ gap: 8, marginBottom: 16 }}>
+            <div><strong>Eligible Players:</strong></div>
+            {leaders.map(p => (
+              <div key={p.id} className="pill">
+                {p.name} ({p.score} pts)
+              </div>
+            ))}
+          </div>
+
+          <div className="hr" />
+          <div><strong>Question:</strong> {suddenDeathQ.question || "(not set)"}</div>
+          <div className="small"><strong>Answer:</strong> <span className="mono">{suddenDeathQ.answer || "(not set)"}</span></div>
+
+          <div className="hr" />
+          <div className="row">
+            <button
+              className="btn"
+              onClick={() => patchRoomIfHost(roomId, hostSecret, { suddenDeath: { ...room.suddenDeath!, revealed: true, acceptingAnswers: true } })}
+              disabled={room.suddenDeath?.revealed}
+            >
+              Reveal & Open Answers
+            </button>
+            <button
+              className="btn btnSecondary"
+              onClick={() => patchRoomIfHost(roomId, hostSecret, { suddenDeath: { ...room.suddenDeath!, acceptingAnswers: false } })}
+            >
+              Close Answers
+            </button>
+            <button
+              className="btn btnSecondary"
+              disabled={busy || room.suddenDeath?.acceptingAnswers}
+              onClick={replaceSuddenDeathQuestion}
+              title={room.suddenDeath?.acceptingAnswers ? "Close answers first" : "Generate a new question"}
+            >
+              Replace Question
+            </button>
+          </div>
+
+          <div className="hr" />
+          <div className="h3">Sudden Death Submissions</div>
+          <div className="grid" style={{ gap: 6 }}>
+            {suddenDeathSubs.length === 0 ? <div className="small">No answers yet.</div> : null}
+            {suddenDeathSubs.map((s) => (
+              <div key={s.id} style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 12,
+                padding: "8px 12px",
+                background: "#0c1323",
+                borderRadius: 6,
+                fontSize: 14
+              }}>
+                <div style={{ fontWeight: 600, minWidth: 120 }}>{s.playerName}</div>
+                <div style={{ flex: 1 }}>{s.answer || <span style={{ opacity: 0.5 }}>(blank)</span>}</div>
+                <div className="pill small">{s.judged === null ? "?" : s.judged ? "+1" : "0"}</div>
+                <button
+                  className="btn"
+                  style={{ fontSize: 12, padding: "4px 12px", minWidth: 70 }}
+                  disabled={s.judged !== null}
+                  onClick={() => judgeSubmission(roomId, hostSecret, s.id, true)}
+                >
+                  ✓
+                </button>
+                <button
+                  className="btn btnSecondary"
+                  style={{ fontSize: 12, padding: "4px 12px", minWidth: 70 }}
+                  disabled={s.judged !== null}
+                  onClick={() => judgeSubmission(roomId, hostSecret, s.id, false)}
+                >
+                  ✗
+                </button>
+              </div>
+            ))}
           </div>
         </div>
       )}
@@ -674,8 +1070,12 @@ function PlayerView({
 
   const q = room.questions[room.currentIndex];
   const isFinal = room.currentIndex === 9;
+  const isSuddenDeath = room.suddenDeath?.active;
+  const suddenDeathQ = room.suddenDeath?.question;
+  const isEligibleForSuddenDeath = room.suddenDeath?.eligiblePlayerIds.includes(playerId) ?? false;
 
   const canSeeQuestion = room.revealed;
+  const canSeeSuddenDeath = room.suddenDeath?.revealed;
 
   return (
     <div className="grid" style={{ gap: 16 }}>
@@ -796,6 +1196,48 @@ function PlayerView({
               </button>
             </div>
           </div>
+        </div>
+      ) : null}
+
+      {isSuddenDeath && joined ? (
+        <div className="card">
+          <div className="h2">⚡ Sudden Death Tiebreaker!</div>
+          {isEligibleForSuddenDeath ? (
+            <div className="small" style={{ color: "#4ecdc4", fontWeight: 600 }}>You are eligible to answer - first correct answer wins!</div>
+          ) : (
+            <div className="small" style={{ color: "#8ab4ff" }}>Watching - only tied leaders can answer</div>
+          )}
+          <div className="hr" />
+
+          {canSeeSuddenDeath && suddenDeathQ && (
+            <>
+              <div style={{ fontSize: 18, lineHeight: 1.4, marginBottom: 16 }}>
+                {suddenDeathQ.question || "(Host is editing question)"}
+              </div>
+
+              {isEligibleForSuddenDeath && (
+                <>
+                  <div className="hr" />
+                  <input className="input" value={answer} onChange={(e) => setAnswer(e.target.value)} placeholder="Type your answer" />
+                  <div className="row" style={{ marginTop: 10 }}>
+                    <button
+                      className="btn"
+                      disabled={!room.suddenDeath?.acceptingAnswers}
+                      onClick={async () => {
+                        await submitAnswer(roomId, playerId, me?.name || playerName || "Player", 999, answer);
+                      }}
+                    >
+                      {room.suddenDeath?.acceptingAnswers ? "Submit Answer" : "Answers closed"}
+                    </button>
+                  </div>
+                </>
+              )}
+            </>
+          )}
+
+          {!canSeeSuddenDeath && (
+            <div className="small" style={{ opacity: 0.7 }}>Waiting for host to reveal the sudden death question...</div>
+          )}
         </div>
       ) : null}
     </div>
