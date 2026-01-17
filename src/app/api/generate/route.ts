@@ -15,15 +15,17 @@ export async function POST() {
 
   const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-  const prompt = `Generate 10 trivia questions with answers. Question 10 will be used as the Final Jeopardy question.
+  const prompt = `Generate 10 challenging trivia questions with answers. Question 10 will be used as the Final Jeopardy question.
 
 Constraints:
-- Questions 1-9: medium/hard-difficulty
-- Question 10 (Final Jeopardy): slightly harder, more prestigious
-- Diverse categories: history, geography, sports, pop culture, science, literature, movies/TV, music.
+- Questions 1-9: hard-difficulty, require specific knowledge, not general/common knowledge
+- Question 10 (Final Jeopardy): expert-level, extremely challenging, requires deep specialized knowledge
+- Diverse categories: history, geography, sports, pop culture, science, literature, movies/TV, music, academia.
+- Focus on lesser-known facts, obscure details, specific dates/numbers, niche topics
 - Each answer should be short (ideally 1-5 words). No essays.
-- No trick questions, no ambiguity.
-- Do NOT repeat the same category more than 2 times.
+- No trick questions, no ambiguity. Answers must be factually verifiable and specific.
+- Do NOT repeat the same category more than once.
+- Avoid common/mainstream questions that casual trivia players would know.
 
 Return ONLY valid JSON with this exact shape:
 {

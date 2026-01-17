@@ -16,7 +16,17 @@ export async function POST(req: Request) {
   }
   const body = await req.json().catch(() => ({}));
   const avoid = Array.isArray(body?.avoid) ? body.avoid : [];
-  const prompt = `Generate ONE medium-difficulty trivia question with a short answer.
+  const isFinale = body?.index === 9; // Question 10 is index 9
+
+  const prompt = `Generate ONE ${isFinale ? "expert-level, extremely challenging" : "hard-difficulty"} trivia question with a short answer.
+${isFinale ? "This is a Final Jeopardy question - it should be very prestigious and require deep specialized knowledge." : ""}
+
+Constraints:
+- Require specific knowledge, not general/common knowledge
+- Focus on lesser-known facts, obscure details, specific dates/numbers, niche topics
+- Answer should be short (ideally 1-5 words). No essays.
+- No trick questions, no ambiguity. Answer must be factually verifiable and specific.
+- Avoid common/mainstream questions that casual trivia players would know.
 
 Avoid these questions (do not repeat them):
 ${avoid.map((q: string) => `- ${q}`).join("\n")}

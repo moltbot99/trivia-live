@@ -51,6 +51,7 @@ export default function RoomPage({ params }: { params: { roomId: string } }) {
   const [playerName, setPlayerName] = useState<string>("");
   const [joined, setJoined] = useState(false);
   const [timeRemaining, setTimeRemaining] = useState<number | null>(null);
+  const [expandedField, setExpandedField] = useState<{ type: "question" | "answer"; text: string } | null>(null);
 
   useEffect(() => subscribeRoom(roomId, setRoom), [roomId]);
   useEffect(() => subscribePlayers(roomId, setPlayers), [roomId]);
@@ -148,6 +149,8 @@ export default function RoomPage({ params }: { params: { roomId: string } }) {
           subs={subs}
           wagers={wagers}
           finalAnswers={finalAnswers}
+          expandedField={expandedField}
+          setExpandedField={setExpandedField}
         />
       ) : (
         <PlayerView
@@ -159,7 +162,57 @@ export default function RoomPage({ params }: { params: { roomId: string } }) {
           setPlayerName={setPlayerName}
           joined={joined}
           setJoined={setJoined}
+          expandedField={expandedField}
+          setExpandedField={setExpandedField}
         />
+      )}
+
+      {expandedField && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: "rgba(0, 0, 0, 0.8)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1000,
+            padding: 20
+          }}
+          onClick={() => setExpandedField(null)}
+        >
+          <div
+            className="card"
+            style={{
+              maxWidth: 600,
+              maxHeight: "80vh",
+              overflow: "auto",
+              animation: "fadeIn 0.2s ease-in"
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="h2" style={{ textTransform: "capitalize" }}>
+              {expandedField.type === "question" ? "Full Question" : "Full Answer"}
+            </div>
+            <div className="hr" />
+            <div style={{ fontSize: 16, lineHeight: 1.6, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+              {expandedField.text}
+            </div>
+            <div className="hr" />
+            <button className="btn" onClick={() => setExpandedField(null)} style={{ width: "100%" }}>
+              Close
+            </button>
+          </div>
+          <style jsx>{`
+            @keyframes fadeIn {
+              from { opacity: 0; }
+              to { opacity: 1; }
+            }
+          `}</style>
+        </div>
       )}
     </div>
   );
@@ -172,7 +225,9 @@ function HostView({
   players,
   subs,
   wagers,
-  finalAnswers
+  finalAnswers,
+  expandedField,
+  setExpandedField
 }: {
   roomId: string;
   room: Room;
@@ -181,6 +236,8 @@ function HostView({
   subs: Submission[];
   wagers: Wager[];
   finalAnswers: FinalAnswer[];
+  expandedField: { type: "question" | "answer"; text: string } | null;
+  setExpandedField: (field: { type: "question" | "answer"; text: string } | null) => void;
 }) {
   const [busy, setBusy] = useState(false);
   const q = room.questions[room.currentIndex];
@@ -215,6 +272,26 @@ function HostView({
   async function updateQField(idx: number, field: "question" | "answer" | "category", value: string) {
     const next = room.questions.map((qq, i) => (i === idx ? { ...qq, [field]: value } : qq));
     await patchRoomIfHost(roomId, hostSecret, { questions: next });
+  }
+
+  async function replaceQuestion(idx: number) {
+    setBusy(true);
+    try {
+      const res = await fetch("/api/replace", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ index: idx })
+      });
+      const data = await res.json();
+      if (data.question) {
+        const next = room.questions.map((q, i) => i === idx ? { ...data.question, id: String(idx + 1) } : q);
+        await patchRoomIfHost(roomId, hostSecret, { questions: next });
+      }
+    } catch (err) {
+      alert(`Error replacing question: ${err}`);
+    } finally {
+      setBusy(false);
+    }
   }
 
   const nonFinal = room.currentIndex < 9;
@@ -290,10 +367,30 @@ function HostView({
                     <td style={{ padding: "8px", minWidth: 40, fontWeight: 600, cursor: "pointer" }} onClick={() => patchRoomIfHost(roomId, hostSecret, { currentIndex: idx, revealed: false, acceptingAnswers: false })}>
                       {idx + 1}
                     </td>
-                    <td style={{ padding: "8px", maxWidth: 300, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", cursor: "pointer" }} onClick={() => patchRoomIfHost(roomId, hostSecret, { currentIndex: idx, revealed: false, acceptingAnswers: false })}>
+                    <td
+                      style={{ padding: "8px", maxWidth: 300, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", cursor: "pointer" }}
+                      onClick={(e) => {
+                        if (question.question && question.question.length > 80) {
+                          e.stopPropagation();
+                          setExpandedField({ type: "question", text: question.question });
+                        } else {
+                          patchRoomIfHost(roomId, hostSecret, { currentIndex: idx, revealed: false, acceptingAnswers: false });
+                        }
+                      }}
+                    >
                       {question.question || "(empty)"}
                     </td>
-                    <td style={{ padding: "8px", maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", cursor: "pointer" }} onClick={() => patchRoomIfHost(roomId, hostSecret, { currentIndex: idx, revealed: false, acceptingAnswers: false })}>
+                    <td
+                      style={{ padding: "8px", maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", cursor: "pointer" }}
+                      onClick={(e) => {
+                        if (question.answer && question.answer.length > 60) {
+                          e.stopPropagation();
+                          setExpandedField({ type: "answer", text: question.answer });
+                        } else {
+                          patchRoomIfHost(roomId, hostSecret, { currentIndex: idx, revealed: false, acceptingAnswers: false });
+                        }
+                      }}
+                    >
                       <span className="mono">{question.answer || "(empty)"}</span>
                     </td>
                     <td style={{ padding: "8px", minWidth: 100, cursor: "pointer" }} onClick={() => patchRoomIfHost(roomId, hostSecret, { currentIndex: idx, revealed: false, acceptingAnswers: false })}>
@@ -412,7 +509,17 @@ function HostView({
           </div>
 
           <div className="hr" />
-          <div className="small">Answer key (host): <span className="mono">{q.answer || "(not set)"}</span></div>
+          <div
+            className="small"
+            style={{ cursor: "pointer", padding: 4, borderRadius: 4, border: "1px solid transparent", transition: "border-color 0.2s", display: "inline-block" }}
+            onClick={() => q.answer && setExpandedField({ type: "answer", text: q.answer })}
+            onMouseEnter={(e) => { if (q.answer && q.answer.length > 60) e.currentTarget.style.borderColor = "#666"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.borderColor = "transparent"; }}
+            title={q.answer && q.answer.length > 60 ? "Click to expand" : ""}
+          >
+            Answer key (host): <span className="mono">{q.answer || "(not set)"}</span>
+            {q.answer && q.answer.length > 60 && <span style={{ marginLeft: 8, opacity: 0.6, fontSize: 12 }}>🔍</span>}
+          </div>
         </div>
       ) : (
         <div className="grid grid2">
@@ -483,7 +590,17 @@ function HostView({
             </div>
 
             <div className="hr" />
-            <div className="small">Final answer key (host): <span className="mono">{q.answer || "(not set)"}</span></div>
+            <div
+              className="small"
+              style={{ cursor: "pointer", padding: 4, borderRadius: 4, border: "1px solid transparent", transition: "border-color 0.2s", display: "inline-block" }}
+              onClick={() => q.answer && setExpandedField({ type: "answer", text: q.answer })}
+              onMouseEnter={(e) => { if (q.answer && q.answer.length > 60) e.currentTarget.style.borderColor = "#666"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.borderColor = "transparent"; }}
+              title={q.answer && q.answer.length > 60 ? "Click to expand" : ""}
+            >
+              Final answer key (host): <span className="mono">{q.answer || "(not set)"}</span>
+              {q.answer && q.answer.length > 60 && <span style={{ marginLeft: 8, opacity: 0.6, fontSize: 12 }}>🔍</span>}
+            </div>
           </div>
         </div>
       )}
@@ -499,7 +616,9 @@ function PlayerView({
   playerName,
   setPlayerName,
   joined,
-  setJoined
+  setJoined,
+  expandedField,
+  setExpandedField
 }: {
   roomId: string;
   room: Room;
@@ -509,6 +628,8 @@ function PlayerView({
   setPlayerName: (s: string) => void;
   joined: boolean;
   setJoined: (b: boolean) => void;
+  expandedField: { type: "question" | "answer"; text: string } | null;
+  setExpandedField: (field: { type: "question" | "answer"; text: string } | null) => void;
 }) {
   const [answer, setAnswer] = useState("");
   const [wager, setWager] = useState<number>(0);
@@ -560,7 +681,16 @@ function PlayerView({
         {q.category ? <div className="pill small">{q.category}</div> : null}
         <div className="hr" />
         {canSeeQuestion ? (
-          <div style={{ fontSize: 18, lineHeight: 1.4 }}>{q.question || (isFinal ? "Final Jeopardy" : "(Host is editing question)")}</div>
+          <div
+            style={{ fontSize: 18, lineHeight: 1.4, cursor: "pointer", padding: 4, borderRadius: 4, border: "1px solid transparent", transition: "border-color 0.2s" }}
+            onClick={() => q.question && setExpandedField({ type: "question", text: q.question })}
+            onMouseEnter={(e) => { if (q.question && q.question.length > 80) e.currentTarget.style.borderColor = "#666"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.borderColor = "transparent"; }}
+            title={q.question && q.question.length > 80 ? "Click to expand" : ""}
+          >
+            {q.question || (isFinal ? "Final Jeopardy" : "(Host is editing question)")}
+            {q.question && q.question.length > 80 && <span style={{ marginLeft: 8, opacity: 0.6, fontSize: 14 }}>🔍</span>}
+          </div>
         ) : (
           <div className="small">Waiting for the host to reveal the question…</div>
         )}
