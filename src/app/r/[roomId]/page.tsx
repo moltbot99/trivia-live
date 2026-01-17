@@ -51,7 +51,7 @@ export default function RoomPage({ params }: { params: { roomId: string } }) {
   const [playerName, setPlayerName] = useState<string>("");
   const [joined, setJoined] = useState(false);
   const [timeRemaining, setTimeRemaining] = useState<number | null>(null);
-  const [expandedField, setExpandedField] = useState<{ type: "question" | "answer"; text: string } | null>(null);
+  const [expandedField, setExpandedField] = useState<{ type: "question" | "answer" | "category"; text: string; questionIndex: number } | null>(null);
 
   useEffect(() => subscribeRoom(roomId, setRoom), [roomId]);
   useEffect(() => subscribePlayers(roomId, setPlayers), [roomId]);
@@ -194,12 +194,48 @@ export default function RoomPage({ params }: { params: { roomId: string } }) {
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="h2" style={{ textTransform: "capitalize" }}>
-              {expandedField.type === "question" ? "Full Question" : "Full Answer"}
+            <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+              <div className="h2" style={{ textTransform: "capitalize", margin: 0 }}>
+                Q{expandedField.questionIndex + 1} - {expandedField.type === "question" ? "Question" : expandedField.type === "answer" ? "Answer" : "Category"}
+              </div>
+              <div className="row" style={{ gap: 8 }}>
+                <button
+                  className="btn btnSecondary"
+                  style={{ padding: "6px 12px" }}
+                  disabled={expandedField.questionIndex === 0}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const prevIndex = expandedField.questionIndex - 1;
+                    const prevQ = room?.questions[prevIndex];
+                    if (prevQ) {
+                      const fieldValue = expandedField.type === "question" ? prevQ.question : expandedField.type === "answer" ? prevQ.answer : prevQ.category || "";
+                      setExpandedField({ type: expandedField.type, text: fieldValue, questionIndex: prevIndex });
+                    }
+                  }}
+                >
+                  ← Prev
+                </button>
+                <button
+                  className="btn btnSecondary"
+                  style={{ padding: "6px 12px" }}
+                  disabled={expandedField.questionIndex === 9}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const nextIndex = expandedField.questionIndex + 1;
+                    const nextQ = room?.questions[nextIndex];
+                    if (nextQ) {
+                      const fieldValue = expandedField.type === "question" ? nextQ.question : expandedField.type === "answer" ? nextQ.answer : nextQ.category || "";
+                      setExpandedField({ type: expandedField.type, text: fieldValue, questionIndex: nextIndex });
+                    }
+                  }}
+                >
+                  Next →
+                </button>
+              </div>
             </div>
             <div className="hr" />
             <div style={{ fontSize: 16, lineHeight: 1.6, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-              {expandedField.text}
+              {expandedField.text || "(empty)"}
             </div>
             <div className="hr" />
             <button className="btn" onClick={() => setExpandedField(null)} style={{ width: "100%" }}>
@@ -236,8 +272,8 @@ function HostView({
   subs: Submission[];
   wagers: Wager[];
   finalAnswers: FinalAnswer[];
-  expandedField: { type: "question" | "answer"; text: string } | null;
-  setExpandedField: (field: { type: "question" | "answer"; text: string } | null) => void;
+  expandedField: { type: "question" | "answer" | "category"; text: string; questionIndex: number } | null;
+  setExpandedField: (field: { type: "question" | "answer" | "category"; text: string; questionIndex: number } | null) => void;
 }) {
   const [busy, setBusy] = useState(false);
   const q = room.questions[room.currentIndex];
@@ -370,12 +406,8 @@ function HostView({
                     <td
                       style={{ padding: "8px", maxWidth: 300, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", cursor: "pointer" }}
                       onClick={(e) => {
-                        if (question.question && question.question.length > 80) {
-                          e.stopPropagation();
-                          setExpandedField({ type: "question", text: question.question });
-                        } else {
-                          patchRoomIfHost(roomId, hostSecret, { currentIndex: idx, revealed: false, acceptingAnswers: false });
-                        }
+                        e.stopPropagation();
+                        setExpandedField({ type: "question", text: question.question, questionIndex: idx });
                       }}
                     >
                       {question.question || "(empty)"}
@@ -383,17 +415,19 @@ function HostView({
                     <td
                       style={{ padding: "8px", maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", cursor: "pointer" }}
                       onClick={(e) => {
-                        if (question.answer && question.answer.length > 60) {
-                          e.stopPropagation();
-                          setExpandedField({ type: "answer", text: question.answer });
-                        } else {
-                          patchRoomIfHost(roomId, hostSecret, { currentIndex: idx, revealed: false, acceptingAnswers: false });
-                        }
+                        e.stopPropagation();
+                        setExpandedField({ type: "answer", text: question.answer, questionIndex: idx });
                       }}
                     >
                       <span className="mono">{question.answer || "(empty)"}</span>
                     </td>
-                    <td style={{ padding: "8px", minWidth: 100, cursor: "pointer" }} onClick={() => patchRoomIfHost(roomId, hostSecret, { currentIndex: idx, revealed: false, acceptingAnswers: false })}>
+                    <td
+                      style={{ padding: "8px", minWidth: 100, cursor: "pointer" }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setExpandedField({ type: "category", text: question.category || "", questionIndex: idx });
+                      }}
+                    >
                       {question.category || "(none)"}
                     </td>
                     <td style={{ padding: "8px", textAlign: "center" }}>
@@ -512,7 +546,7 @@ function HostView({
           <div
             className="small"
             style={{ cursor: "pointer", padding: 4, borderRadius: 4, border: "1px solid transparent", transition: "border-color 0.2s", display: "inline-block" }}
-            onClick={() => q.answer && setExpandedField({ type: "answer", text: q.answer })}
+            onClick={() => q.answer && setExpandedField({ type: "answer", text: q.answer, questionIndex: room.currentIndex })}
             onMouseEnter={(e) => { if (q.answer && q.answer.length > 60) e.currentTarget.style.borderColor = "#666"; }}
             onMouseLeave={(e) => { e.currentTarget.style.borderColor = "transparent"; }}
             title={q.answer && q.answer.length > 60 ? "Click to expand" : ""}
@@ -593,7 +627,7 @@ function HostView({
             <div
               className="small"
               style={{ cursor: "pointer", padding: 4, borderRadius: 4, border: "1px solid transparent", transition: "border-color 0.2s", display: "inline-block" }}
-              onClick={() => q.answer && setExpandedField({ type: "answer", text: q.answer })}
+              onClick={() => q.answer && setExpandedField({ type: "answer", text: q.answer, questionIndex: room.currentIndex })}
               onMouseEnter={(e) => { if (q.answer && q.answer.length > 60) e.currentTarget.style.borderColor = "#666"; }}
               onMouseLeave={(e) => { e.currentTarget.style.borderColor = "transparent"; }}
               title={q.answer && q.answer.length > 60 ? "Click to expand" : ""}
@@ -628,8 +662,8 @@ function PlayerView({
   setPlayerName: (s: string) => void;
   joined: boolean;
   setJoined: (b: boolean) => void;
-  expandedField: { type: "question" | "answer"; text: string } | null;
-  setExpandedField: (field: { type: "question" | "answer"; text: string } | null) => void;
+  expandedField: { type: "question" | "answer" | "category"; text: string; questionIndex: number } | null;
+  setExpandedField: (field: { type: "question" | "answer" | "category"; text: string; questionIndex: number } | null) => void;
 }) {
   const [answer, setAnswer] = useState("");
   const [wager, setWager] = useState<number>(0);
@@ -683,7 +717,7 @@ function PlayerView({
         {canSeeQuestion ? (
           <div
             style={{ fontSize: 18, lineHeight: 1.4, cursor: "pointer", padding: 4, borderRadius: 4, border: "1px solid transparent", transition: "border-color 0.2s" }}
-            onClick={() => q.question && setExpandedField({ type: "question", text: q.question })}
+            onClick={() => q.question && setExpandedField({ type: "question", text: q.question, questionIndex: room.currentIndex })}
             onMouseEnter={(e) => { if (q.question && q.question.length > 80) e.currentTarget.style.borderColor = "#666"; }}
             onMouseLeave={(e) => { e.currentTarget.style.borderColor = "transparent"; }}
             title={q.question && q.question.length > 80 ? "Click to expand" : ""}
