@@ -182,7 +182,7 @@ export async function judgeFinal(roomId: string, hostSecret: string, playerId: s
 
 export async function resetAllScores(roomId: string, hostSecret: string): Promise<void> {
   const roomRef = doc(db, "rooms", roomId);
-  
+
   // First verify host and get all players
   const roomSnap = await getDoc(roomRef);
   const room = roomSnap.data() as Room | undefined;
