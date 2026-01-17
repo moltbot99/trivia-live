@@ -1,20 +1,26 @@
+"use client";
+
 import { initializeApp } from "firebase/app";
-import { getAnalytics } from "firebase/analytics";
+import { getAnalytics, isSupported } from "firebase/analytics";
 import { getFirestore } from "firebase/firestore";
 
 // Your web app's Firebase configuration
 // For Firebase JS SDK v7.20.0 and later, measurementId is optional
 const firebaseConfig = {
-  apiKey: "AIzaSyAmZGJMEcG5Nh2DESJWycbw0KSGGU4BJkM",
-  authDomain: "feud-live.firebaseapp.com",
-  projectId: "feud-live",
-  storageBucket: "feud-live.firebasestorage.app",
-  messagingSenderId: "899976762657",
-  appId: "1:899976762657:web:2799bc4bb68e3a04c09a60",
-  measurementId: "G-5T3ZMLK6DH"
+  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
+  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
+  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
+  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
+  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
 };
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
-const analytics = getAnalytics(app);
+
+// Initialize analytics only in browser environment
+if (typeof window !== "undefined" && isSupported()) {
+  getAnalytics(app);
+}
+
 export const db = getFirestore(app);
