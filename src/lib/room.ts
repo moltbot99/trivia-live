@@ -7,6 +7,7 @@ import {
   query,
   setDoc,
   updateDoc,
+  deleteDoc,
   serverTimestamp,
   orderBy,
   runTransaction,
@@ -208,4 +209,9 @@ export async function resetAllScores(roomId: string, hostSecret: string): Promis
 export async function getAllPlayers(roomId: string): Promise<Player[]> {
   const snap = await getDocs(query(collection(db, "rooms", roomId, "players"), orderBy("joinedAt", "asc")));
   return snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as Player[];
+}
+
+export async function removePlayer(roomId: string, playerId: string) {
+  const ref = doc(db, "rooms", roomId, "players", playerId);
+  await deleteDoc(ref);
 }

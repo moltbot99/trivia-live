@@ -9,6 +9,7 @@ import {
   judgeFinal,
   judgeSubmission,
   patchRoomIfHost,
+  removePlayer,
   resetAllScores,
   submitAnswer,
   submitFinalAnswer,
@@ -1103,9 +1104,24 @@ function PlayerView({
       {joined ? (
         <div className="card">
           <div className="h2">You</div>
-          <div className="row" style={{ justifyContent: "space-between" }}>
-            <div>{me?.name}</div>
-            <div className="mono">Score: {me?.score ?? 0}</div>
+          <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+            <div>
+              <div>{me?.name}</div>
+              <div className="mono" style={{ fontSize: 14, opacity: 0.8 }}>Score: {me?.score ?? 0}</div>
+            </div>
+            <button
+              className="btn btnDanger"
+              style={{ fontSize: 12, padding: "6px 12px" }}
+              onClick={async () => {
+                if (confirm("Are you sure you want to leave the game?")) {
+                  await removePlayer(roomId, playerId);
+                  setJoined(false);
+                  localStorage.removeItem(`trivia_player_${roomId}`);
+                }
+              }}
+            >
+              Leave Game
+            </button>
           </div>
         </div>
       ) : null}
