@@ -1,8 +1,6 @@
 import OpenAI from "openai";
 import { NextResponse } from "next/server";
 
-const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
 function extractJson(text: string) {
   const start = text.indexOf("{");
   const end = text.lastIndexOf("}");
@@ -14,6 +12,9 @@ export async function POST(req: Request) {
   if (!process.env.OPENAI_API_KEY) {
     return NextResponse.json({ error: "OPENAI_API_KEY not set" }, { status: 500 });
   }
+
+  const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
   const body = await req.json().catch(() => ({}));
   const avoid = Array.isArray(body?.avoid) ? body.avoid : [];
   const isFinale = body?.index === 9; // Question 10 is index 9
@@ -34,20 +35,39 @@ ${avoid.map((q: string) => `- ${q}`).join("\n")}
 Return ONLY valid JSON with this exact shape:
 { "question": { "question": "...", "answer": "...", "category": "..." } }`;
 
-  const response = await client.chat.completions.create({
-    model: process.env.OPENAI_MODEL || "gpt-4o-mini",
-    messages: [{ role: "user", content: prompt }],
-    max_tokens: 250
+  const modelEnv = String(process.env.OPENAI_MODEL || "");
+  const allowedModels = ["gpt-4o-mini", "gpt-4.1-mini"] as const;
+  const model = (allowedModels as readonly string[]).includes(modelEnv) ? modelEnv : "gpt-4o-mini";
+
+  const resp = await client.responses.create({
+    model,
+    input: prompt,
+    max_output_tokens: 250
   });
 
-  const text = response.choices[0]?.message?.content || "";
+  const text = (resp.output_text || "").trim();
+
   try {
-    const data = extractJson(text);
+    let data: any;
+    if (text) {
+      data = extractJson(text);
+    } else {
+      const firstItem: any = (resp as any).output?.[0]?.content?.[0];
+      if (firstItem?.type === "json" && firstItem.json) {
+        data = firstItem.json;
+      } else if (firstItem?.type === "output_text" && typeof firstItem.text === "string") {
+        data = extractJson(firstItem.text);
+      } else {
+        throw new Error("No JSON found");
+      }
+    }
     if (!data?.question?.question || !data?.question?.answer) throw new Error("Bad shape");
     return NextResponse.json({ question: data.question });
   } catch (e: any) {
+    console.error("Replace API error:", e);
+    console.error("Raw response:", text);
     return NextResponse.json(
-      { error: "Failed to parse model output", raw: text.slice(0, 2000), details: String(e?.message ?? e) },
+      { error: `Failed to parse model output: ${e?.message}`, raw: text.slice(0, 500) },
       { status: 500 }
     );
   }
