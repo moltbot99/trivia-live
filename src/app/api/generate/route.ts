@@ -28,6 +28,7 @@ Constraints:
 - No trick questions, no ambiguity. Answers must be factually verifiable and specific.
 - Do NOT repeat the same category more than once.
 - Target intermediate to advanced trivia players - challenging but fair.
+- IMPORTANT: Question 10 should have a SPECIFIC subject category (like "American History", "World Geography", "Classical Music", etc.), NOT a generic category like "Final Jeopardy" or "General Knowledge".
 
 Return ONLY valid JSON with this exact shape:
 {

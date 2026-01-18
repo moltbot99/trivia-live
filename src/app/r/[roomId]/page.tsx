@@ -23,6 +23,57 @@ import {
 import { clamp, safeTrim } from "@/lib/util";
 import { FinalAnswer, Player, Room, Submission, Wager } from "@/lib/types";
 
+type Toast = {
+  id: string;
+  message: string;
+  type: "success" | "error" | "info";
+};
+
+function Toast({ toast, onDismiss }: { toast: Toast; onDismiss: (id: string) => void }) {
+  useEffect(() => {
+    const timer = setTimeout(() => onDismiss(toast.id), 2000);
+    return () => clearTimeout(timer);
+  }, [toast.id, onDismiss]);
+
+  const bgColor = toast.type === "success" ? "#4ecdc4" : toast.type === "error" ? "#ff6b6b" : "#8ab4ff";
+
+  return (
+    <div
+      style={{
+        padding: "12px 16px",
+        background: bgColor,
+        color: "#000",
+        borderRadius: 8,
+        fontWeight: 600,
+        fontSize: 14,
+        boxShadow: "0 4px 12px rgba(0, 0, 0, 0.3)",
+        animation: "slideInRight 0.3s ease-out",
+        cursor: "pointer",
+        minWidth: 200,
+        maxWidth: 400,
+      }}
+      onClick={() => onDismiss(toast.id)}
+    >
+      {toast.message}
+    </div>
+  );
+}
+
+function useToast() {
+  const [toasts, setToasts] = useState<Toast[]>([]);
+
+  const showToast = (message: string, type: "success" | "error" | "info" = "success") => {
+    const id = crypto.randomUUID();
+    setToasts([{ id, message, type }]);
+  };
+
+  const dismissToast = (id: string) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  };
+
+  return { toasts, showToast, dismissToast };
+}
+
 function useLocalId(key: string) {
   const [id, setId] = useState<string>("");
   useEffect(() => {
@@ -57,6 +108,8 @@ export default function RoomPage({ params }: { params: { roomId: string } }) {
   const [expandedField, setExpandedField] = useState<{ type: "question" | "answer" | "category"; text: string; questionIndex: number } | null>(null);
   const [showSuddenDeathResults, setShowSuddenDeathResults] = useState(false);
   const [busy, setBusy] = useState(false);
+
+  const { toasts, showToast, dismissToast } = useToast();
 
   useEffect(() => subscribeRoom(roomId, setRoom), [roomId]);
   useEffect(() => subscribePlayers(roomId, setPlayers), [roomId]);
@@ -141,6 +194,23 @@ export default function RoomPage({ params }: { params: { roomId: string } }) {
 
   return (
     <div className="grid" style={{ gap: 16 }}>
+      {/* Toast notifications container */}
+      <div
+        style={{
+          position: "fixed",
+          top: 20,
+          right: 20,
+          zIndex: 3000,
+          display: "flex",
+          flexDirection: "column",
+          gap: 8,
+        }}
+      >
+        {toasts.map((toast) => (
+          <Toast key={toast.id} toast={toast} onDismiss={dismissToast} />
+        ))}
+      </div>
+
       <div className="row" style={{ alignItems: "stretch" }}>
         <div className="card" style={{ flex: 1, minWidth: 280 }}>
           <div className="h1">
@@ -197,6 +267,7 @@ export default function RoomPage({ params }: { params: { roomId: string } }) {
           leaders={leaders}
           expandedField={expandedField}
           setExpandedField={setExpandedField}
+          showToast={showToast}
         />
       ) : (
         <PlayerView
@@ -210,6 +281,7 @@ export default function RoomPage({ params }: { params: { roomId: string } }) {
           setJoined={setJoined}
           expandedField={expandedField}
           setExpandedField={setExpandedField}
+          showToast={showToast}
         />
       )}
 
@@ -288,12 +360,6 @@ export default function RoomPage({ params }: { params: { roomId: string } }) {
               Close
             </button>
           </div>
-          <style jsx>{`
-            @keyframes fadeIn {
-              from { opacity: 0; }
-              to { opacity: 1; }
-            }
-          `}</style>
         </div>
       )}
 
@@ -406,18 +472,6 @@ export default function RoomPage({ params }: { params: { roomId: string } }) {
               </div>
             )}
           </div>
-          <style jsx>{`
-            @keyframes slideIn {
-              from {
-                opacity: 0;
-                transform: translateY(-30px);
-              }
-              to {
-                opacity: 1;
-                transform: translateY(0);
-              }
-            }
-          `}</style>
         </div>
       )}
     </div>
@@ -509,7 +563,8 @@ function HostView({
   allFinalAnswersJudged,
   leaders,
   expandedField,
-  setExpandedField
+  setExpandedField,
+  showToast
 }: {
   roomId: string;
   room: Room;
@@ -523,6 +578,7 @@ function HostView({
   leaders: Player[];
   expandedField: { type: "question" | "answer" | "category"; text: string; questionIndex: number } | null;
   setExpandedField: (field: { type: "question" | "answer" | "category"; text: string; questionIndex: number } | null) => void;
+  showToast: (message: string, type?: "success" | "error" | "info") => void;
 }) {
   const [busy, setBusy] = useState(false);
   const q = room.questions[room.currentIndex];
@@ -540,6 +596,9 @@ function HostView({
         acceptingAnswers: false,
         final: { wagersOpen: false, answersOpen: false, revealedAnswer: false }
       });
+      showToast("New game generated!", "success");
+    } catch (err) {
+      showToast(`Error generating game: ${err}`, "error");
     } finally {
       setBusy(false);
     }
@@ -549,14 +608,16 @@ function HostView({
     if (!confirm("Reset all player scores to 0?")) return;
     try {
       await resetAllScores(roomId, hostSecret);
+      showToast("All scores reset to 0", "success");
     } catch (err) {
-      alert(`Error resetting scores: ${err}`);
+      showToast(`Error resetting scores: ${err}`, "error");
     }
   }
 
   async function updateQField(idx: number, field: "question" | "answer" | "category", value: string) {
     const next = room.questions.map((qq, i) => (i === idx ? { ...qq, [field]: value } : qq));
     await patchRoomIfHost(roomId, hostSecret, { questions: next });
+    showToast(`Question ${idx + 1} ${field} updated`, "success");
   }
 
   async function replaceQuestion(idx: number) {
@@ -571,9 +632,10 @@ function HostView({
       if (data.question) {
         const next = room.questions.map((q, i) => i === idx ? { ...data.question, id: String(idx + 1) } : q);
         await patchRoomIfHost(roomId, hostSecret, { questions: next });
+        showToast(`Question ${idx + 1} replaced`, "success");
       }
     } catch (err) {
-      alert(`Error replacing question: ${err}`);
+      showToast(`Error replacing question: ${err}`, "error");
     } finally {
       setBusy(false);
     }
@@ -581,6 +643,7 @@ function HostView({
 
   async function endGame() {
     await patchRoomIfHost(roomId, hostSecret, { status: "ended" });
+    showToast("Game ended", "info");
   }
 
   async function startSuddenDeath() {
@@ -598,9 +661,10 @@ function HostView({
             acceptingAnswers: false
           }
         });
+        showToast("Sudden death started!", "success");
       }
     } catch (err) {
-      alert(`Error starting sudden death: ${err}`);
+      showToast(`Error starting sudden death: ${err}`, "error");
     } finally {
       setBusy(false);
     }
@@ -618,9 +682,10 @@ function HostView({
             question: { ...data.question, id: "sudden_death" }
           }
         });
+        showToast("Sudden death question replaced", "success");
       }
     } catch (err) {
-      alert(`Error replacing sudden death question: ${err}`);
+      showToast(`Error replacing question: ${err}`, "error");
     } finally {
       setBusy(false);
     }
@@ -660,14 +725,20 @@ function HostView({
             <button
               className="btn btnSecondary"
               disabled={room.currentIndex === 0}
-              onClick={() => patchRoomIfHost(roomId, hostSecret, { currentIndex: room.currentIndex - 1, revealed: false, acceptingAnswers: false })}
+              onClick={async () => {
+                await patchRoomIfHost(roomId, hostSecret, { currentIndex: room.currentIndex - 1, revealed: false, acceptingAnswers: false });
+                showToast(`Moved to Q${room.currentIndex}`, "info");
+              }}
             >
               Prev
             </button>
             <button
               className="btn btnSecondary"
               disabled={room.currentIndex === 9}
-              onClick={() => patchRoomIfHost(roomId, hostSecret, { currentIndex: room.currentIndex + 1, revealed: false, acceptingAnswers: false })}
+              onClick={async () => {
+                await patchRoomIfHost(roomId, hostSecret, { currentIndex: room.currentIndex + 1, revealed: false, acceptingAnswers: false });
+                showToast(`Moved to Q${room.currentIndex + 2}`, "info");
+              }}
             >
               Next
             </button>
@@ -755,19 +826,28 @@ function HostView({
               <>
                 <button
                   className="btn"
-                  onClick={() => patchRoomIfHost(roomId, hostSecret, { status: "question", revealed: true, acceptingAnswers: true, revealedAt: new Date() })}
+                  onClick={async () => {
+                    await patchRoomIfHost(roomId, hostSecret, { status: "question", revealed: true, acceptingAnswers: true, revealedAt: new Date() });
+                    showToast("Question revealed - Answers open for 30s", "success");
+                  }}
                 >
                   Reveal + Open Answers (30s)
                 </button>
                 <button
                   className="btn btnSecondary"
-                  onClick={() => patchRoomIfHost(roomId, hostSecret, { acceptingAnswers: false })}
+                  onClick={async () => {
+                    await patchRoomIfHost(roomId, hostSecret, { acceptingAnswers: false });
+                    showToast("Answers closed", "info");
+                  }}
                 >
                   Close Answers
                 </button>
                 <button
                   className="btn btnSecondary"
-                  onClick={() => patchRoomIfHost(roomId, hostSecret, { revealed: false, acceptingAnswers: false })}
+                  onClick={async () => {
+                    await patchRoomIfHost(roomId, hostSecret, { revealed: false, acceptingAnswers: false });
+                    showToast("Question hidden", "info");
+                  }}
                 >
                   Hide Question
                 </button>
@@ -776,13 +856,19 @@ function HostView({
               <>
                 <button
                   className="btn"
-                  onClick={() => patchRoomIfHost(roomId, hostSecret, { status: "final_wager", revealed: true, acceptingAnswers: false, final: { ...room.final, wagersOpen: true, answersOpen: false, revealedAnswer: false } })}
+                  onClick={async () => {
+                    await patchRoomIfHost(roomId, hostSecret, { status: "final_wager", revealed: true, acceptingAnswers: false, final: { ...room.final, wagersOpen: true, answersOpen: false, revealedAnswer: false } });
+                    showToast("Final wagers now open", "success");
+                  }}
                 >
                   Open Final Wagers
                 </button>
                 <button
                   className="btn btnSecondary"
-                  onClick={() => patchRoomIfHost(roomId, hostSecret, { status: "final_answer", revealedAt: new Date(), acceptingAnswers: true, final: { ...room.final, wagersOpen: false, answersOpen: true } })}
+                  onClick={async () => {
+                    await patchRoomIfHost(roomId, hostSecret, { status: "final_answer", revealedAt: new Date(), acceptingAnswers: true, final: { ...room.final, wagersOpen: false, answersOpen: true } });
+                    showToast("Final answers open for 30s", "success");
+                  }}
                 >
                   Open Final Answers (30s)
                 </button>
@@ -824,7 +910,10 @@ function HostView({
                   className="btn"
                   style={{ fontSize: 12, padding: "4px 12px", minWidth: 70 }}
                   disabled={s.judged !== null}
-                  onClick={() => judgeSubmission(roomId, hostSecret, s.id, true)}
+                  onClick={async () => {
+                    await judgeSubmission(roomId, hostSecret, s.id, true);
+                    showToast(`${s.playerName} - Correct! +1 point`, "success");
+                  }}
                 >
                   ✓
                 </button>
@@ -832,7 +921,10 @@ function HostView({
                   className="btn btnSecondary"
                   style={{ fontSize: 12, padding: "4px 12px", minWidth: 70 }}
                   disabled={s.judged !== null}
-                  onClick={() => judgeSubmission(roomId, hostSecret, s.id, false)}
+                  onClick={async () => {
+                    await judgeSubmission(roomId, hostSecret, s.id, false);
+                    showToast(`${s.playerName} - Incorrect`, "info");
+                  }}
                 >
                   ✗
                 </button>
@@ -904,7 +996,11 @@ function HostView({
                       className="btn"
                       style={{ fontSize: 12, padding: "4px 12px", minWidth: 70 }}
                       disabled={a.judged !== null}
-                      onClick={() => judgeFinal(roomId, hostSecret, a.playerId, true)}
+                      onClick={async () => {
+                        const wagerAmount = w ? w.wager : 0;
+                        await judgeFinal(roomId, hostSecret, a.playerId, true);
+                        showToast(`${a.playerName} - Correct! +${wagerAmount}`, "success");
+                      }}
                     >
                       ✓
                     </button>
@@ -912,7 +1008,11 @@ function HostView({
                       className="btn btnSecondary"
                       style={{ fontSize: 12, padding: "4px 12px", minWidth: 70 }}
                       disabled={a.judged !== null}
-                      onClick={() => judgeFinal(roomId, hostSecret, a.playerId, false)}
+                      onClick={async () => {
+                        const wagerAmount = w ? w.wager : 0;
+                        await judgeFinal(roomId, hostSecret, a.playerId, false);
+                        showToast(`${a.playerName} - Incorrect -${wagerAmount}`, "info");
+                      }}
                     >
                       ✗
                     </button>
@@ -976,14 +1076,20 @@ function HostView({
           <div className="row">
             <button
               className="btn"
-              onClick={() => patchRoomIfHost(roomId, hostSecret, { suddenDeath: { ...room.suddenDeath!, revealed: true, acceptingAnswers: true } })}
+              onClick={async () => {
+                await patchRoomIfHost(roomId, hostSecret, { suddenDeath: { ...room.suddenDeath!, revealed: true, acceptingAnswers: true } });
+                showToast("Sudden death question revealed", "success");
+              }}
               disabled={room.suddenDeath?.revealed}
             >
               Reveal & Open Answers
             </button>
             <button
               className="btn btnSecondary"
-              onClick={() => patchRoomIfHost(roomId, hostSecret, { suddenDeath: { ...room.suddenDeath!, acceptingAnswers: false } })}
+              onClick={async () => {
+                await patchRoomIfHost(roomId, hostSecret, { suddenDeath: { ...room.suddenDeath!, acceptingAnswers: false } });
+                showToast("Sudden death answers closed", "info");
+              }}
             >
               Close Answers
             </button>
@@ -1018,7 +1124,10 @@ function HostView({
                   className="btn"
                   style={{ fontSize: 12, padding: "4px 12px", minWidth: 70 }}
                   disabled={s.judged !== null}
-                  onClick={() => judgeSubmission(roomId, hostSecret, s.id, true)}
+                  onClick={async () => {
+                    await judgeSubmission(roomId, hostSecret, s.id, true);
+                    showToast(`${s.playerName} wins sudden death!`, "success");
+                  }}
                 >
                   ✓
                 </button>
@@ -1026,7 +1135,10 @@ function HostView({
                   className="btn btnSecondary"
                   style={{ fontSize: 12, padding: "4px 12px", minWidth: 70 }}
                   disabled={s.judged !== null}
-                  onClick={() => judgeSubmission(roomId, hostSecret, s.id, false)}
+                  onClick={async () => {
+                    await judgeSubmission(roomId, hostSecret, s.id, false);
+                    showToast(`${s.playerName} - Incorrect`, "info");
+                  }}
                 >
                   ✗
                 </button>
@@ -1049,7 +1161,8 @@ function PlayerView({
   joined,
   setJoined,
   expandedField,
-  setExpandedField
+  setExpandedField,
+  showToast
 }: {
   roomId: string;
   room: Room;
@@ -1061,6 +1174,7 @@ function PlayerView({
   setJoined: (b: boolean) => void;
   expandedField: { type: "question" | "answer" | "category"; text: string; questionIndex: number } | null;
   setExpandedField: (field: { type: "question" | "answer" | "category"; text: string; questionIndex: number } | null) => void;
+  showToast: (message: string, type?: "success" | "error" | "info") => void;
 }) {
   const [answer, setAnswer] = useState("");
   const [wager, setWager] = useState<number>(0);
@@ -1078,6 +1192,11 @@ function PlayerView({
   const canSeeQuestion = room.revealed;
   const canSeeSuddenDeath = room.suddenDeath?.revealed;
 
+  // For Final Jeopardy: show category when wagers open, show question when answers open
+  const canSeeFinalCategory = isFinal && room.final.wagersOpen;
+  const canSeeFinalQuestion = isFinal && room.final.answersOpen;
+  const showFinalJeopardy = isFinal && (room.final.wagersOpen || room.final.answersOpen);
+
   return (
     <div className="grid" style={{ gap: 16 }}>
       {!joined ? (
@@ -1093,6 +1212,7 @@ function PlayerView({
               onClick={async () => {
                 await joinAsPlayer(roomId, playerId, playerName);
                 setJoined(true);
+                showToast(`Welcome, ${playerName}!`, "success");
               }}
             >
               Join
@@ -1117,6 +1237,7 @@ function PlayerView({
                   await removePlayer(roomId, playerId);
                   setJoined(false);
                   localStorage.removeItem(`trivia_player_${roomId}`);
+                  showToast("You left the game", "info");
                 }
               }}
             >
@@ -1128,21 +1249,46 @@ function PlayerView({
 
       <div className="card">
         <div className="h2">Question {room.currentIndex + 1}/10</div>
-        {q.category ? <div className="pill small">{q.category}</div> : null}
+        {q.category && (canSeeQuestion || canSeeFinalCategory) ? <div className="pill small">{q.category}</div> : null}
         <div className="hr" />
-        {canSeeQuestion ? (
-          <div
-            style={{ fontSize: 18, lineHeight: 1.4, cursor: "pointer", padding: 4, borderRadius: 4, border: "1px solid transparent", transition: "border-color 0.2s" }}
-            onClick={() => q.question && setExpandedField({ type: "question", text: q.question, questionIndex: room.currentIndex })}
-            onMouseEnter={(e) => { if (q.question && q.question.length > 80) e.currentTarget.style.borderColor = "#666"; }}
-            onMouseLeave={(e) => { e.currentTarget.style.borderColor = "transparent"; }}
-            title={q.question && q.question.length > 80 ? "Click to expand" : ""}
-          >
-            {q.question || (isFinal ? "Final Jeopardy" : "(Host is editing question)")}
-            {q.question && q.question.length > 80 && <span style={{ marginLeft: 8, opacity: 0.6, fontSize: 14 }}>🔍</span>}
-          </div>
+        {isFinal ? (
+          // Final Jeopardy special handling
+          <>
+            {canSeeFinalQuestion ? (
+              <div
+                style={{ fontSize: 18, lineHeight: 1.4, cursor: "pointer", padding: 4, borderRadius: 4, border: "1px solid transparent", transition: "border-color 0.2s" }}
+                onClick={() => q.question && setExpandedField({ type: "question", text: q.question, questionIndex: room.currentIndex })}
+                onMouseEnter={(e) => { if (q.question && q.question.length > 80) e.currentTarget.style.borderColor = "#666"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.borderColor = "transparent"; }}
+                title={q.question && q.question.length > 80 ? "Click to expand" : ""}
+              >
+                {q.question || "Final Jeopardy"}
+                {q.question && q.question.length > 80 && <span style={{ marginLeft: 8, opacity: 0.6, fontSize: 14 }}>🔍</span>}
+              </div>
+            ) : canSeeFinalCategory ? (
+              <div className="small">Category revealed. Waiting for host to reveal the question…</div>
+            ) : (
+              <div className="small">Waiting for the host to open Final Jeopardy…</div>
+            )}
+          </>
         ) : (
-          <div className="small">Waiting for the host to reveal the question…</div>
+          // Regular questions
+          <>
+            {canSeeQuestion ? (
+              <div
+                style={{ fontSize: 18, lineHeight: 1.4, cursor: "pointer", padding: 4, borderRadius: 4, border: "1px solid transparent", transition: "border-color 0.2s" }}
+                onClick={() => q.question && setExpandedField({ type: "question", text: q.question, questionIndex: room.currentIndex })}
+                onMouseEnter={(e) => { if (q.question && q.question.length > 80) e.currentTarget.style.borderColor = "#666"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.borderColor = "transparent"; }}
+                title={q.question && q.question.length > 80 ? "Click to expand" : ""}
+              >
+                {q.question || "(Host is editing question)"}
+                {q.question && q.question.length > 80 && <span style={{ marginLeft: 8, opacity: 0.6, fontSize: 14 }}>🔍</span>}
+              </div>
+            ) : (
+              <div className="small">Waiting for the host to reveal the question…</div>
+            )}
+          </>
         )}
       </div>
 
@@ -1158,6 +1304,7 @@ function PlayerView({
               disabled={!room.acceptingAnswers}
               onClick={async () => {
                 await submitAnswer(roomId, playerId, me?.name || playerName || "Player", room.currentIndex, answer);
+                showToast("Answer submitted!", "success");
               }}
             >
               {room.acceptingAnswers ? "Submit" : "Answers closed"}
@@ -1166,7 +1313,7 @@ function PlayerView({
         </div>
       ) : null}
 
-      {joined && canSeeQuestion && isFinal ? (
+      {joined && showFinalJeopardy ? (
         <div className="grid grid2">
           <div className="card">
             <div className="h2">Final Wager</div>
@@ -1188,6 +1335,7 @@ function PlayerView({
                   const max = me?.score ?? 0;
                   const w = clamp(Math.floor(wager), 0, max);
                   await submitWager(roomId, playerId, me?.name || playerName || "Player", w);
+                  showToast(`Wager submitted: ${w}`, "success");
                 }}
               >
                 {room.final.wagersOpen ? "Submit wager" : "Wagers closed"}
@@ -1206,6 +1354,7 @@ function PlayerView({
                 disabled={!room.final.answersOpen}
                 onClick={async () => {
                   await submitFinalAnswer(roomId, playerId, me?.name || playerName || "Player", answer);
+                  showToast("Final answer submitted!", "success");
                 }}
               >
                 {room.final.answersOpen ? "Submit final answer" : "Final answers closed"}
@@ -1241,6 +1390,7 @@ function PlayerView({
                       disabled={!room.suddenDeath?.acceptingAnswers}
                       onClick={async () => {
                         await submitAnswer(roomId, playerId, me?.name || playerName || "Player", 999, answer);
+                        showToast("Sudden death answer submitted!", "success");
                       }}
                     >
                       {room.suddenDeath?.acceptingAnswers ? "Submit Answer" : "Answers closed"}
