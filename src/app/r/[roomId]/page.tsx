@@ -649,10 +649,12 @@ function HostView({
   async function startSuddenDeath() {
     setBusy(true);
     try {
+      console.log("Starting sudden death, leaders:", leaders);
       const res = await fetch("/api/replace", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ index: 10 }) });
       const data = await res.json();
+      console.log("Sudden death question data:", data);
       if (data.question) {
-        await patchRoomIfHost(roomId, hostSecret, {
+        const suddenDeathData = {
           suddenDeath: {
             active: true,
             question: { ...data.question, id: "sudden_death" },
@@ -660,10 +662,15 @@ function HostView({
             revealed: false,
             acceptingAnswers: false
           }
-        });
+        };
+        console.log("Updating room with:", suddenDeathData);
+        await patchRoomIfHost(roomId, hostSecret, suddenDeathData);
         showToast("Sudden death started!", "success");
+      } else {
+        showToast("No question returned from API", "error");
       }
     } catch (err) {
+      console.error("Sudden death error:", err);
       showToast(`Error starting sudden death: ${err}`, "error");
     } finally {
       setBusy(false);
