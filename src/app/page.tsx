@@ -57,7 +57,7 @@ export default function HomePage() {
       <div className="card">
         <div className="h2">How it works</div>
         <ul className="small">
-          <li>Host generates 10 medium questions from OpenAI, then can edit/replace any.</li>
+          <li>Host generates 10 medium questions from Claude, then can edit/replace any.</li>
           <li>Host reveals each question; everyone gets it at the same time.</li>
           <li>Players type answers; host marks Correct/Incorrect for +1 point.</li>
           <li>Question 10 is Final Jeopardy: players wager up to their score, then answer.</li>
